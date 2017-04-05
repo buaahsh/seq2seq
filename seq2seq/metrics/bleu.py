@@ -26,7 +26,6 @@ import subprocess
 import tempfile
 import numpy as np
 
-from six.moves import urllib
 import tensorflow as tf
 
 
@@ -46,47 +45,56 @@ def moses_multi_bleu(hypotheses, references, lowercase=False):
   if np.size(hypotheses) == 0:
     return np.float32(0.0)
 
-  # Get MOSES multi-bleu script
-  multi_bleu_path, _ = urllib.request.urlretrieve(
-      "https://raw.githubusercontent.com/moses-smt/mosesdecoder/"
-      "master/scripts/generic/multi-bleu.perl")
-  os.chmod(multi_bleu_path, 0o755)
+  # # Get MOSES multi-bleu script
+  # multi_bleu_path, _ = urllib.request.urlretrieve(
+  #     "https://raw.githubusercontent.com/moses-smt/mosesdecoder/"
+  #     "master/scripts/generic/multi-bleu.perl")
+  # os.chmod(multi_bleu_path, 0o755)
 
   # Alternatively, get file locally
-  # training_dir = os.path.dirname(os.path.realpath(__file__))
-  # bin_dir = os.path.abspath(os.path.join(training_dir, "..", "..", "bin"))
-  # multi_bleu_path = os.path.join(bin_dir, "tools/multi-bleu.perl")
+  training_dir = os.path.dirname(os.path.realpath(__file__))
+  bin_dir = os.path.abspath(os.path.join(training_dir, "..", "..", "bin"))
+  multi_bleu_path = os.path.join(bin_dir, "tools/multi-bleu.perl")
 
   # Dump hypotheses and references to tempfiles
-  # hypothesis_file = tempfile.NamedTemporaryFile()
-  # hypothesis_file.write("\n".join(hypotheses).encode("utf-8"))
-  # hypothesis_file.write(b"\n")
-  # hypothesis_file.flush()
-  # reference_file = tempfile.NamedTemporaryFile()
-  # reference_file.write("\n".join(references).encode("utf-8"))
-  # reference_file.write(b"\n")
-  # reference_file.flush()
-  #
+  hypothesis_file = tempfile.NamedTemporaryFile(delete=False)
+  hypothesis_file.write("\n".join(hypotheses).encode("utf-8"))
+  hypothesis_file.write(b"\n")
+  hypothesis_file.flush()
+  hypothesis_file.close()
+
+  reference_file = tempfile.NamedTemporaryFile(delete=False)
+  reference_file.write("\n".join(references).encode("utf-8"))
+  reference_file.write(b"\n")
+  reference_file.flush()
+  reference_file.close()
+
+  # print(hypotheses, references, '!!!!!!!!!!!')
+  # print(os.environ['PATH'])
+
   # # Calculate BLEU using multi-bleu script
-  # with open(hypothesis_file.name, "r") as read_pred:
-  #   bleu_cmd = [multi_bleu_path]
-  #   if lowercase:
-  #     bleu_cmd += ["-lc"]
-  #   bleu_cmd += [reference_file.name]
-  #   try:
-  #     bleu_out = subprocess.check_output(
-  #         bleu_cmd, stdin=read_pred, stderr=subprocess.STDOUT)
-  #     bleu_out = bleu_out.decode("utf-8")
-  #     bleu_score = re.search(r"BLEU = (.+?),", bleu_out).group(1)
-  #     bleu_score = float(bleu_score)
-  #   except subprocess.CalledProcessError as error:
-  #     if error.output is not None:
-  #       tf.logging.warning("multi-bleu.perl script returned non-zero exit code")
-  #       tf.logging.warning(error.output)
-  #     bleu_score = np.float32(0.0)
-  #
-  # # Close temp files
-  # hypothesis_file.close()
-  # reference_file.close()
-  bleu_score = 22
+  with open(hypothesis_file.name, "r") as read_pred:
+    bleu_cmd = ['perl.exe', multi_bleu_path]
+    if lowercase:
+      bleu_cmd += ["-lc"]
+    bleu_cmd += [reference_file.name]
+    try:
+      bleu_out = subprocess.check_output(
+          bleu_cmd, stdin=read_pred, stderr=subprocess.STDOUT)
+      bleu_out = bleu_out.decode("utf-8")
+      bleu_score = re.search(r"BLEU = (.+?),", bleu_out).group(1)
+      bleu_score = float(bleu_score)
+    except subprocess.CalledProcessError as error:
+      if error.output is not None:
+        tf.logging.warning("multi-bleu.perl script returned non-zero exit code")
+        tf.logging.warning(error.output)
+      bleu_score = np.float32(0.0)
+
+  # bleu_score = 22
   return np.float32(bleu_score)
+
+
+if __name__ == '__main__':
+    hypotheses = ['a b b', 'b b b', 'b UNK UNK UNK', 'a a a a']
+    references = ['SEQUENCE_START b b', 'SEQUENCE_START a a', 'SEQUENCE_START c c c', 'SEQUENCE_START 泣 泣 泣']
+    print(moses_multi_bleu(hypotheses, references))
