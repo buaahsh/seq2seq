@@ -17,6 +17,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
 
 import abc
 import six
@@ -92,7 +93,7 @@ class AttentionLayer(GraphModule, Configurable):
       the weighted inputs.
       A tensor fo shape `[B, input_dim]`.
     """
-    values_depth = keys.get_shape().as_list()[-1]
+    values_depth = values.get_shape().as_list()[-1]
 
     # Fully connected layers to transform both keys and query
     # into a tensor with `num_units` units
@@ -125,6 +126,7 @@ class AttentionLayer(GraphModule, Configurable):
     context = tf.expand_dims(scores_normalized, 2) * values
     context = tf.reduce_sum(context, 1, name="context")
     context.set_shape([None, values_depth])
+
 
     return (scores_normalized, context)
 

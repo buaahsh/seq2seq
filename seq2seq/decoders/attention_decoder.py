@@ -18,6 +18,7 @@ A basic sequence decoder that performs a softmax based on the RNN state.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
 
 from collections import namedtuple
 import tensorflow as tf
@@ -46,10 +47,10 @@ class AttentionDecoder(RNNDecoder):
       state.
     vocab_size: Output vocabulary size, i.e. number of units
       in the softmax layer
-    attention_values: The sequence used to calculate attention scores.
+    attention_keys: The sequence used to calculate attention scores.
       A tensor of shape `[B, T, ...]`.
     attention_values: The sequence to attend over.
-      A tensor of shape `[B, T, ...]`.
+      A tensor of shape `[B, T, input_dim]`.
     attention_values_length: Sequence length of the attention values.
       An int32 Tensor of shape `[B]`.
     attention_fn: The attention function to use. This function map from
@@ -85,8 +86,8 @@ class AttentionDecoder(RNNDecoder):
         logits=self.vocab_size,
         predicted_ids=tf.TensorShape([]),
         cell_output=self.cell.output_size,
-        attention_scores=tf.expand_dims(tf.shape(self.attention_values)[1], 0),
-        attention_context=self.attention_values.get_shape()[2])
+        attention_scores=tf.shape(self.attention_values)[1:-1],
+        attention_context=self.attention_values.get_shape()[-1])
 
   @property
   def output_dtype(self):
@@ -103,7 +104,7 @@ class AttentionDecoder(RNNDecoder):
     # Concat empty attention context
     attention_context = tf.zeros([
         tf.shape(first_inputs)[0],
-        self.attention_values.get_shape().as_list()[2]
+        self.attention_values.get_shape().as_list()[-1]
     ])
     first_inputs = tf.concat([first_inputs, attention_context], 1)
 

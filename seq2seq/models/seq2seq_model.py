@@ -16,6 +16,9 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
+
+import collections
 
 import tensorflow as tf
 
@@ -27,39 +30,6 @@ from seq2seq.graph_utils import templatemethod
 from seq2seq.decoders.beam_search_decoder import BeamSearchDecoder
 from seq2seq.inference import beam_search
 from seq2seq.models.model_base import ModelBase, _flatten_dict
-
-
-def _create_predictions(decoder_output, features, labels, losses=None):
-  """Creates the dictionary of predictions that is returned by the model.
-  """
-  predictions = {}
-
-  # Add features and, if available, labels to predictions
-  predictions.update(_flatten_dict({"features": features}))
-  if labels is not None:
-    predictions.update(_flatten_dict({"labels": labels}))
-
-  if losses is not None:
-    predictions["losses"] = _transpose_batch_time(losses)
-
-  # Decoders returns output in time-major form [T, B, ...]
-  # Here we transpose everything back to batch-major for the user
-  decoder_output_flat = _flatten_dict(decoder_output._asdict())
-  decoder_output_flat = {
-      k: _transpose_batch_time(v)
-      for k, v in decoder_output_flat.items()
-  }
-  predictions.update(decoder_output_flat)
-
-  # If we predict the ids also map them back into the vocab
-  if "predicted_ids" in predictions.keys():
-    vocab_tables = graph_utils.get_dict_from_collection("vocab_tables")
-    target_id_to_vocab = vocab_tables["target_id_to_vocab"]
-    predicted_tokens = target_id_to_vocab.lookup(
-        tf.to_int64(predictions["predicted_ids"]))
-    predictions["predicted_tokens"] = predicted_tokens
-
-  return predictions
 
 
 class Seq2SeqModel(ModelBase):
@@ -85,14 +55,67 @@ class Seq2SeqModel(ModelBase):
         "source.reverse": True,
         "target.max_seq_len": 50,
         "embedding.dim": 100,
+        "embedding.init_scale": 0.04,
         "embedding.share": False,
         "inference.beam_search.beam_width": 0,
         "inference.beam_search.length_penalty_weight": 0.0,
         "inference.beam_search.choose_successors_fn": "choose_top_k",
+        "optimizer.clip_embed_gradients": 0.1,
         "vocab_source": "",
         "vocab_target": "",
     })
     return params
+
+  def _clip_gradients(self, grads_and_vars):
+    """In addition to standard gradient clipping, also clips embedding
+    gradients to a specified value."""
+    grads_and_vars = super(Seq2SeqModel, self)._clip_gradients(grads_and_vars)
+
+    clipped_gradients = []
+    variables = []
+    for gradient, variable in grads_and_vars:
+      if "embedding" in variable.name:
+        tmp = tf.clip_by_norm(
+            gradient.values, self.params["optimizer.clip_embed_gradients"])
+        gradient = tf.IndexedSlices(tmp, gradient.indices, gradient.dense_shape)
+      clipped_gradients.append(gradient)
+      variables.append(variable)
+    return list(zip(clipped_gradients, variables))
+
+  def _create_predictions(self, decoder_output, features, labels, losses=None):
+    """Creates the dictionary of predictions that is returned by the model.
+    """
+    predictions = {}
+
+    # Add features and, if available, labels to predictions
+    predictions.update(_flatten_dict({"features": features}))
+    if labels is not None:
+      predictions.update(_flatten_dict({"labels": labels}))
+
+    if losses is not None:
+      predictions["losses"] = _transpose_batch_time(losses)
+
+    # Decoders returns output in time-major form [T, B, ...]
+    # Here we transpose everything back to batch-major for the user
+    output_dict = collections.OrderedDict(
+        zip(decoder_output._fields, decoder_output))
+    decoder_output_flat = _flatten_dict(output_dict)
+    decoder_output_flat = {
+        k: _transpose_batch_time(v)
+        for k, v in decoder_output_flat.items()
+    }
+    predictions.update(decoder_output_flat)
+
+    # If we predict the ids also map them back into the vocab and process them
+    if "predicted_ids" in predictions.keys():
+      vocab_tables = graph_utils.get_dict_from_collection("vocab_tables")
+      target_id_to_vocab = vocab_tables["target_id_to_vocab"]
+      predicted_tokens = target_id_to_vocab.lookup(
+          tf.to_int64(predictions["predicted_ids"]))
+      # Raw predicted tokens
+      predictions["predicted_tokens"] = predicted_tokens
+
+    return predictions
 
   def batch_size(self, features, labels):
     """Returns the batch size of the curren batch based on the passed
@@ -106,7 +129,11 @@ class Seq2SeqModel(ModelBase):
     """Returns the embedding used for the source sequence.
     """
     return tf.get_variable(
-        "W", [self.source_vocab_info.total_size, self.params["embedding.dim"]])
+        name="W",
+        shape=[self.source_vocab_info.total_size, self.params["embedding.dim"]],
+        initializer=tf.random_uniform_initializer(
+            -self.params["embedding.init_scale"],
+            self.params["embedding.init_scale"]))
 
   @property
   @templatemethod("target_embedding")
@@ -116,7 +143,11 @@ class Seq2SeqModel(ModelBase):
     if self.params["embedding.share"]:
       return self.source_embedding
     return tf.get_variable(
-        "W", [self.target_vocab_info.total_size, self.params["embedding.dim"]])
+        name="W",
+        shape=[self.target_vocab_info.total_size, self.params["embedding.dim"]],
+        initializer=tf.random_uniform_initializer(
+            -self.params["embedding.init_scale"],
+            self.params["embedding.init_scale"]))
 
   @templatemethod("encode")
   def encode(self, features, labels):
@@ -161,9 +192,6 @@ class Seq2SeqModel(ModelBase):
 
     - Creates vocabulary lookup tables for source and target vocab
     - Converts tokens into vocabulary ids
-    - Appends a special "SEQUENCE_END" token to the source
-    - Prepends a special "SEQUENCE_START" token to the target
-    - Appends a special "SEQUENCE_END" token to the target
     """
 
     # Create vocabulary lookup for source
@@ -226,6 +254,16 @@ class Seq2SeqModel(ModelBase):
     labels["target_len"] = tf.to_int32(labels["target_len"])
     tf.summary.histogram("target_len", tf.to_float(labels["target_len"]))
 
+    # Keep track of the number of processed tokens
+    num_tokens = tf.reduce_sum(labels["target_len"])
+    num_tokens += tf.reduce_sum(features["source_len"])
+    token_counter_var = tf.Variable(0, "tokens_counter")
+    total_tokens = tf.assign_add(token_counter_var, num_tokens)
+    tf.summary.scalar("num_tokens", total_tokens)
+
+    with tf.control_dependencies([total_tokens]):
+      features["source_tokens"] = tf.identity(features["source_tokens"])
+
     # Add to graph collection for later use
     graph_utils.add_dict_to_collection(features, "features")
     if labels:
@@ -260,7 +298,7 @@ class Seq2SeqModel(ModelBase):
     decoder_output, _, = self.decode(encoder_output, features, labels)
 
     if self.mode == tf.contrib.learn.ModeKeys.INFER:
-      predictions = _create_predictions(
+      predictions = self._create_predictions(
           decoder_output=decoder_output, features=features, labels=labels)
       loss = None
       train_op = None
@@ -271,7 +309,7 @@ class Seq2SeqModel(ModelBase):
       if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
         train_op = self._build_train_op(loss)
 
-      predictions = _create_predictions(
+      predictions = self._create_predictions(
           decoder_output=decoder_output,
           features=features,
           labels=labels,

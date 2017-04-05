@@ -21,6 +21,7 @@ of (features, labels) that can be read by tf.learn estimators.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
 
 import abc
 import sys
@@ -122,7 +123,7 @@ class ParallelTextInputPipeline(InputPipeline):
 
   Params:
     source_files: An array of file names for the source data.
-    target_files: An array of file names for the target data. These mut
+    target_files: An array of file names for the target data. These must
       be aligned to the `source_files`.
     source_delimiter: A character to split the source text on. Defaults
       to  " " (space). For character-level training this can be set to the

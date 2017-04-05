@@ -16,6 +16,11 @@
 """Main script to run training and evaluation of models.
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import os
 import tempfile
 
@@ -30,7 +35,7 @@ from seq2seq import models
 from seq2seq.configurable import _maybe_load_yaml, _create_from_dict
 from seq2seq.configurable import _deep_merge_dict
 from seq2seq.data import input_pipeline
-from seq2seq.metrics.metric_specs import METRIC_SPECS_DICT
+from seq2seq.metrics import metric_specs
 from seq2seq.training import hooks
 from seq2seq.training import utils as training_utils
 
@@ -100,6 +105,15 @@ tf.flags.DEFINE_integer("keep_checkpoint_every_n_hours", 4,
                         """In addition to keeping the most recent checkpoint
                         files, keep one checkpoint file for every N hours of
                         training.""")
+tf.flags.DEFINE_float("gpu_memory_fraction", 1.0,
+                      """Fraction of GPU memory used by the process on
+                      each GPU uniformly on the same machine.""")
+tf.flags.DEFINE_boolean("gpu_allow_growth", False,
+                        """Allow GPU memory allocation to grow
+                        dynamically.""")
+tf.flags.DEFINE_boolean("log_device_placement", False,
+                        """Log the op placement to devices""")
+
 
 FLAGS = tf.flags.FLAGS
 
@@ -116,8 +130,10 @@ def create_experiment(output_dir):
       save_checkpoints_secs=FLAGS.save_checkpoints_secs,
       save_checkpoints_steps=FLAGS.save_checkpoints_steps,
       keep_checkpoint_max=FLAGS.keep_checkpoint_max,
-      keep_checkpoint_every_n_hours=FLAGS.keep_checkpoint_every_n_hours
-  )
+      keep_checkpoint_every_n_hours=FLAGS.keep_checkpoint_every_n_hours,
+      gpu_memory_fraction=FLAGS.gpu_memory_fraction)
+  config.tf_config.gpu_options.allow_growth = FLAGS.gpu_allow_growth
+  config.tf_config.log_device_placement = FLAGS.log_device_placement
 
   train_options = training_utils.TrainOptions(
       model_class=FLAGS.model,
@@ -140,7 +156,8 @@ def create_experiment(output_dir):
   train_input_fn = training_utils.create_input_fn(
       pipeline=train_input_pipeline,
       batch_size=FLAGS.batch_size,
-      bucket_boundaries=bucket_boundaries)
+      bucket_boundaries=bucket_boundaries,
+      scope="train_input_fn")
 
   # Development data input pipeline
   dev_input_pipeline = input_pipeline.make_input_pipeline_from_def(
@@ -152,7 +169,8 @@ def create_experiment(output_dir):
   eval_input_fn = training_utils.create_input_fn(
       pipeline=dev_input_pipeline,
       batch_size=FLAGS.batch_size,
-      allow_smaller_final_batch=True)
+      allow_smaller_final_batch=True,
+      scope="dev_input_fn")
 
 
   def model_fn(features, labels, params, mode):
@@ -172,12 +190,17 @@ def create_experiment(output_dir):
   # Create hooks
   train_hooks = []
   for dict_ in FLAGS.hooks:
-    hook = _create_from_dict(dict_, hooks, model_dir=estimator.model_dir)
+    hook = _create_from_dict(
+        dict_, hooks,
+        model_dir=estimator.model_dir,
+        run_config=config)
     train_hooks.append(hook)
 
   # Create metrics
-  metric_list = FLAGS.metrics
-  eval_metrics = {m : METRIC_SPECS_DICT[m] for m in metric_list}
+  eval_metrics = {}
+  for dict_ in FLAGS.metrics:
+    metric = _create_from_dict(dict_, metric_specs)
+    eval_metrics[metric.name] = metric
 
   experiment = tf.contrib.learn.Experiment(
       estimator=estimator,
@@ -222,8 +245,10 @@ def main(_argv):
     if hasattr(FLAGS, flag_key) and isinstance(getattr(FLAGS, flag_key), dict):
       merged_value = _deep_merge_dict(flag_value, getattr(FLAGS, flag_key))
       setattr(FLAGS, flag_key, merged_value)
-    else:
+    elif hasattr(FLAGS, flag_key):
       setattr(FLAGS, flag_key, flag_value)
+    else:
+      tf.logging.warning("Ignoring config flag: %s", flag_key)
 
   if FLAGS.save_checkpoints_secs is None \
     and FLAGS.save_checkpoints_steps is None:

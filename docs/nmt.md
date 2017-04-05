@@ -10,7 +10,7 @@ This tutorial is not meant to be a general introduction to Neural Machine Transl
 
 ## Data Format
 
-A standard format used in both statistical and neural translation is the **parallel text format**. It consists of a pair of plain text with files corresponding to source sentences and target translations, aligned line-by-bline. For example,
+A standard format used in both statistical and neural translation is the **parallel text format**. It consists of a pair of plain text with files corresponding to source sentences and target translations, aligned line-by-line. For example,
 
 sources.en (English):
 
@@ -28,7 +28,7 @@ Das ist der Fall von Alexander Nikitin.
 
 Each line corresponds to a sequence of **tokens**, separated by spaces. In the simplest case, the tokens are the words in the sentence. Typically, we use a tokenizer to split sentences into tokens while taking into account word stems and punctuation. For example, common choices for tokenizers are the Moses [tokenizer.perl](https://github.com/moses-smt/mosesdecoder/blob/master/scripts/tokenizer/tokenizer.perl) script or libraries such a [spaCy](https://spacy.io/docs/usage/processing-text), [nltk](http://www.nltk.org/api/nltk.tokenize.html) or [Stanford Tokenizer](http://nlp.stanford.edu/software/tokenizer.shtml).
 
-However, learning a model based on words has a couple of drawbacks. Because NMT models output a probability distribution over words, they can became very slow with large number of possible words. If you include misspellings and derived words in your vocabulary, the number of possible words is essentially ininfite and we need to impose an artificial limit of how of the most common words we want our model to handle. This is also called the **vocabulary size** and typically set to something in the range of 10,000 to 100,000. Another drawback of training on word tokens is that the model does not learn about common "stems" of words. For example, it would consider "loved" and "loving" as completely separate classes despite their common root.
+However, learning a model based on words has a couple of drawbacks. Because NMT models output a probability distribution over words, they can became very slow with large number of possible words. If you include misspellings and derived words in your vocabulary, the number of possible words is essentially infinite and we need to impose an artificial limit on how many of the most common words we want our model to handle. This is also called the **vocabulary size** and typically set to something in the range of 10,000 to 100,000. Another drawback of training on word tokens is that the model does not learn about common "stems" of words. For example, it would consider "loved" and "loving" as completely separate classes despite their common root.
 
 One way to handle an **open vocabulary** issue is learn **subword units** for a given text. For example, the word "loved" may be split up into "lov" and "ed", while "loving" would be split up into "lov" and "ing". This allows to model to generalize to new words, while also resulting in a smaller vocabulary size. There are several techniques for learning such subword units, including [Byte Pair Encoding (BPE)](https://arxiv.org/abs/1508.07909), which is what we used in this tutorial. To generate a BPE for a given text, you can follow the instructions in the official [subword-nmt](https://github.com/rsennrich/subword-nmt) repository:
 
@@ -159,7 +159,10 @@ export MODEL_DIR=${TMPDIR:-/tmp}/nmt_tutorial
 mkdir -p $MODEL_DIR
 
 python -m bin.train \
-  --config_paths="./example_configs/nmt_small.yml,./example_configs/train_seq2seq.yml" \
+  --config_paths="
+      ./example_configs/nmt_small.yml,
+      ./example_configs/train_seq2seq.yml,
+      ./example_configs/text_metrics_bpe.yml" \
   --model_params "
       vocab_source: $VOCAB_SOURCE
       vocab_target: $VOCAB_TARGET" \
@@ -196,8 +199,8 @@ Throughout the traning process you will see the loss decreasing and samples gene
 tensorboard --logdir $MODEL_DIR
 ```
 
-![Log Perplexity](/images/nmt_tutorial_ppl.png)
-![BLEU Score](/images/nmt_tutorial_bleu.png)
+![Log Perplexity](images/nmt_tutorial_ppl.png)
+![BLEU Score](images/nmt_tutorial_bleu.png)
 
 ## Making predictions
 
@@ -265,4 +268,3 @@ The training script will save multiple model checkpoints throughout training. Th
 ```
 
 The `multi-bleu.perl` script is taken from [Moses](https://github.com/moses-smt/mosesdecoder/blob/master/scripts/generic/multi-bleu.perl) and is one of the most common ways to calculcate BLEU. Note that we calculate BLEU scores on tokenized text. An alternative is to calculate BLEU on untokenized text. To do this, would first need to detokenize your model outputs.
-

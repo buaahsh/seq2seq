@@ -54,6 +54,13 @@ class TestMosesBleu(tf.test.TestCase):
         lowercase=False,
         expected_bleu=46.51)
 
+  def test_empty(self):
+    self._test_multi_bleu(
+        hypotheses=np.array([]),
+        references=np.array([]),
+        lowercase=False,
+        expected_bleu=0.00)
+
   def test_multi_bleu_lowercase(self):
     self._test_multi_bleu(
         hypotheses=np.array([
@@ -102,7 +109,7 @@ class TestBleuMetricSpec(TestTextMetricSpec):
   """Tests the `BleuMetricSpec`"""
 
   def test_bleu(self):
-    metric_spec = BleuMetricSpec()
+    metric_spec = BleuMetricSpec({})
     return self._test_metric_spec(
         metric_spec=metric_spec,
         hyps=["A B C D E F", "A B C D E F"],
@@ -114,28 +121,66 @@ class TestRougeMetricSpec(TestTextMetricSpec):
   """Tests the `RougeMetricSpec`"""
 
   def test_rouge_1_f_score(self):
-    metric_spec = RougeMetricSpec("rouge_1/f_score")
-    return self._test_metric_spec(
+    metric_spec = RougeMetricSpec({"rouge_type":  "rouge_1/f_score"})
+    self._test_metric_spec(
         metric_spec=metric_spec,
         hyps=["A B C D E F", "A B C D E F"],
         refs=["A B C D E F", "A B A D E F"],
         expected_scores=[1.0, 0.954])
 
+    self._test_metric_spec(
+        metric_spec=metric_spec,
+        hyps=[],
+        refs=[],
+        expected_scores=[0.0])
+
+    self._test_metric_spec(
+        metric_spec=metric_spec,
+        hyps=["A"],
+        refs=["B"],
+        expected_scores=[0.0])
+
+
   def test_rouge_2_f_score(self):
-    metric_spec = RougeMetricSpec("rouge_2/f_score")
-    return self._test_metric_spec(
+    metric_spec = RougeMetricSpec({"rouge_type":  "rouge_2/f_score"})
+    self._test_metric_spec(
         metric_spec=metric_spec,
         hyps=["A B C D E F", "A B C D E F"],
         refs=["A B C D E F", "A B A D E F"],
         expected_scores=[1.0, 0.8])
 
+    self._test_metric_spec(
+        metric_spec=metric_spec,
+        hyps=[],
+        refs=[],
+        expected_scores=[0.0])
+
+    self._test_metric_spec(
+        metric_spec=metric_spec,
+        hyps=["A"],
+        refs=["B"],
+        expected_scores=[0.0])
+
   def test_rouge_l_f_score(self):
-    metric_spec = RougeMetricSpec("rouge_l/f_score")
-    return self._test_metric_spec(
+    metric_spec = RougeMetricSpec({"rouge_type":  "rouge_l/f_score"})
+
+    self._test_metric_spec(
         metric_spec=metric_spec,
         hyps=["A B C D E F", "A B C D E F"],
         refs=["A B C D E F", "A B A D E F"],
         expected_scores=[1.0, 0.916])
+
+    self._test_metric_spec(
+        metric_spec=metric_spec,
+        hyps=[],
+        refs=[],
+        expected_scores=[0.0])
+
+    self._test_metric_spec(
+        metric_spec=metric_spec,
+        hyps=["A"],
+        refs=["B"],
+        expected_scores=[0.0])
 
 
 class TestRougeMetric(tf.test.TestCase):
